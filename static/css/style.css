@@ -23,6 +23,7 @@
     justify-content: center;
 }
 
+.modal img,
 .modal .modal-content img {
     max-width: 90%;
     max-height: 90%;
@@ -2869,7 +2870,7 @@ tbody td:first-child {
     transition: opacity 0.2s ease;
 }
 
-* Drag and Drop Styles */ #image-preview-container.drag-over {
+#image-preview-container.drag-over {
     border: 2px dashed var(--primary-color);
     background-color: rgba(59, 130, 246, 0.1);
 }

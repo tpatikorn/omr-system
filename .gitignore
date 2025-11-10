@@ -1,3 +1,6 @@
 .env
 .idea
 poppler
+uploads
+config
+debug_output

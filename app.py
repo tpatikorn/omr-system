@@ -1,6 +1,15 @@
-import cv2
-import numpy as np
+import io
+import json
+import os
+import secrets
+import shutil
+import time
+import traceback
+import uuid
+from datetime import datetime
+from queue import Queue
 import pandas as pd
+from PIL import Image
 from flask import (
     Flask,
     request,
@@ -14,145 +23,23 @@ from flask import (
     url_for,
 )
 from flask_compress import Compress
-from imutils import contours
-from imutils.perspective import four_point_transform
-import io
-import os
-import traceback
-import uuid
-import json
-import time
-from queue import Queue
-import logging
-from werkzeug.serving import WSGIRequestHandler
-import ssl
-from datetime import datetime
-from pdf2image import convert_from_bytes
-from PIL import Image
-import secrets
-import shutil
-import socket
-import socket
 
+from file_manager import clear_folder
+from image_util import convert_pdf_to_images, create_web_optimized_image, clean_image_file
+from omr import OMRSystemFinal
+from logging_manager import setup_logging
+from session_manager import get_session_path, get_session_data, get_global_session_list, save_global_session_list, \
+    _cleanup_inactive_sessions_loop, process_data, load_answer_key, save_session_data
+from web_util import get_base_url, get_local_ip
 
-# --- ปรับปรุงระบบ Logging ---
-def setup_logging(app_instance):
-    # สร้าง Custom Request Handler ที่กรองข้อมูล SSL และ garbage
-    class SilentRequestHandler(WSGIRequestHandler):
-        def log_request(self, code="-", size="-"):
-            # กรองคำขอที่เป็น SSL/binary garbage
-            if (
-                hasattr(self, "requestline")
-                and self.requestline
-                and (
-                    not self.requestline.startswith(
-                        ("GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ")
-                    )
-                    or len(self.requestline) > 1000
-                    or any(
-                        ord(c) > 127 or ord(c) < 32
-                        for c in self.requestline
-                        if c not in "\r\n"
-                    )
-                )
-            ):
-                return  # ไม่ log คำขอที่เป็น binary/garbage
-
-            # Log เฉพาะคำขอที่ปกติ
-            super().log_request(code, size)
-
-        def log_error(self, format, *args):
-            # กรองข้อผิดพลาดที่เกี่ยวกับ SSL และ bad request
-            if args:
-                message = format % args
-                # ข้อความที่ไม่ต้องการ log
-                filtered_messages = [
-                    "Bad request version",
-                    "Bad request syntax",
-                    "code 400",
-                    "Bad HTTP/0.9 request type",
-                    "Address already in use",
-                    "Connection aborted",
-                    "SSL",
-                    "handshake",
-                ]
-
-                if any(
-                    filtered_msg.lower() in message.lower()
-                    for filtered_msg in filtered_messages
-                ):
-                    return  # ไม่ log ข้อผิดพลาดเหล่านี้
-
-            super().log_error(format, *args)
-
-    # ตั้งค่า Flask request handler
-    # เก็บ original wsgi_app
-    original_wsgi_app = app_instance.wsgi_app
-
-    # สร้าง wrapper function ที่ใช้ SilentRequestHandler
-    def wsgi_wrapper(environ, start_response):
-        return original_wsgi_app(environ, start_response)
-
-    app_instance.wsgi_app = wsgi_wrapper
-
-    # กรอง Werkzeug logger
-    werkzeug_logger = logging.getLogger("werkzeug")
-    werkzeug_logger.setLevel(logging.WARNING)  # เปลี่ยนจาก INFO เป็น WARNING
-
-    # สร้าง custom filter สำหรับ werkzeug
-    class CleanLogFilter(logging.Filter):
-        def filter(self, record):
-            message = record.getMessage().lower()
-            # กรองข้อความที่ไม่ต้องการ
-            unwanted_patterns = [
-                "bad request version",
-                "bad request syntax",
-                "bad http/0.9 request type",
-                "code 400",
-                "connection broken",
-                "connection aborted",
-                "ssl",
-                "handshake",
-                "certificate",
-                "tls",
-            ]
-
-            # ตรวจสอบว่ามี pattern ที่ไม่ต้องการหรือไม่
-            if any(pattern in message for pattern in unwanted_patterns):
-                return False
-
-            # กรองข้อความที่มี binary characters
-            if any(
-                ord(c) > 127 or (ord(c) < 32 and c not in "\n\r\t")
-                for c in record.getMessage()
-            ):
-                return False
-
-            return True
-
-    # เพิ่ม filter ให้กับ werkzeug logger
-    if not any(isinstance(f, CleanLogFilter) for f in werkzeug_logger.filters):
-        werkzeug_logger.addFilter(CleanLogFilter())
-
-    # ตั้งค่า root logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[logging.StreamHandler()],
-    )
-
-    # สร้าง application logger ที่แยกต่างหาก
-    app_logger = logging.getLogger("omr_app")
-    app_logger.setLevel(logging.INFO)
-
-    return app_logger
-
+import threading
 
 # --- โฟลเดอร์สำหรับเก็บไฟล์ ---
 UPLOAD_FOLDER = "uploads"
 DEBUG_FOLDER = "debug_output"
 STATIC_FOLDER = "config"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "pdf"}
+CLEANUP_THREAD_STARTED = False
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)  # สำหรับ session management
@@ -202,630 +89,8 @@ class MessageAnnouncer:
 
 
 announcer = MessageAnnouncer()
-
-
-# === Helper Functions for Dynamic Base URL ===
-def get_local_ip():
-    """ตรวจจับ IP address ของเครื่องในเครือข่าย local"""
-    # วิธีที่ 1: ดึงจาก environment variable OMR_BASE_URL ก่อน
-    env_base_url = os.environ.get('OMR_BASE_URL')
-    if env_base_url:
-        try:
-            # แยก IP จาก URL เช่น http://172.16.19.35:5000 -> 172.16.19.35
-            from urllib.parse import urlparse
-            parsed = urlparse(env_base_url)
-            if parsed.hostname:
-                return parsed.hostname
-        except Exception:
-            pass
-    
-    try:
-        # วิธีที่ 2: เชื่อมต่อไปยัง Google DNS เพื่อหา IP ที่ใช้งานจริง
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            return local_ip
-    except Exception:
-        try:
-            # วิธีที่ 3: ใช้ hostname
-            hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
-            if local_ip.startswith("127."):
-                # ถ้าได้ localhost ให้ลองวิธีอื่น
-                return get_network_ip()
-            return local_ip
-        except Exception:
-            # วิธีที่ 4: fallback เป็น localhost
-            return "127.0.0.1"
-
-
-def get_network_ip():
-    """หา IP address ที่ไม่ใช่ localhost"""
-    try:
-        import netifaces
-        # ถ้ามี netifaces ให้ใช้
-        for interface in netifaces.interfaces():
-            addresses = netifaces.ifaddresses(interface)
-            if netifaces.AF_INET in addresses:
-                for addr in addresses[netifaces.AF_INET]:
-                    ip = addr['addr']
-                    if not ip.startswith('127.') and not ip.startswith('169.254.'):
-                        return ip
-    except ImportError:
-        # ถ้าไม่มี netifaces ให้ใช้วิธีอื่น
-        pass
-    
-    try:
-        # ใช้ socket เพื่อหา IP ที่ active
-        import subprocess
-        import platform
-        
-        if platform.system() == "Windows":
-            result = subprocess.run(['ipconfig'], capture_output=True, text=True)
-            lines = result.stdout.split('\n')
-            for line in lines:
-                if 'IPv4' in line and '192.168.' in line:
-                    ip = line.split(':')[-1].strip()
-                    return ip
-        else:
-            result = subprocess.run(['hostname', '-I'], capture_output=True, text=True)
-            ips = result.stdout.strip().split()
-            for ip in ips:
-                if ip.startswith('192.168.') or ip.startswith('10.') or ip.startswith('172.'):
-                    return ip
-    except Exception:
-        pass
-    
-    return "127.0.0.1"
-
-
-def get_base_url(request_obj=None, port=5000):
-    """สร้าง base URL ที่ยืดหยุ่นตาม environment"""
-    
-    # ตรวจสอบว่ามี environment variable สำหรับ base URL หรือไม่
-    env_base_url = os.environ.get('OMR_BASE_URL')
-    if env_base_url:
-        return env_base_url.rstrip('/')
-    
-    # ตรวจสอบว่ามี ngrok หรือ tunnel service หรือไม่
-    ngrok_url = os.environ.get('NGROK_URL')
-    if ngrok_url:
-        return ngrok_url.rstrip('/')
-    
-    # ถ้ามี request object ให้ใช้ host จาก request
-    if request_obj:
-        scheme = 'https' if request_obj.is_secure else 'http'
-        host = request_obj.host
-        return f"{scheme}://{host}"
-    
-    # ใช้ local IP address
-    local_ip = get_local_ip()
-    
-    # ตรวจสอบว่าเป็น localhost หรือไม่
-    if local_ip == "127.0.0.1":
-        return f"http://localhost:{port}"
-    else:
-        return f"http://{local_ip}:{port}"
-
-
-class OMRSystemFinal:
-    def __init__(self):
-        # ปิด debug mode เพื่อเพิ่มความเร็วในการประมวลผล
-        self.debug_mode = False  # เปลี่ยนจาก True เป็น False
-        self.debug_folder = "debug_output"
-        if not os.path.exists(self.debug_folder):
-            os.makedirs(self.debug_folder)
-
-    def find_main_blocks(self, contours_list, image_shape):
-        h_img, w_img = image_shape[:2]
-        image_area = h_img * w_img
-        student_id_block_contour = None
-        answer_column_contours = []
-
-        for c in contours_list:
-            (x, y, w, h) = cv2.boundingRect(c)
-
-            try:
-                aspect_ratio = w / float(h)
-            except ZeroDivisionError:
-                continue
-
-            area_ratio = cv2.contourArea(c) / image_area
-
-            if (
-                0.8 < aspect_ratio < 3.0
-                and 0.01 < area_ratio < 0.15
-                and y < h_img * 0.3
-            ):
-                if student_id_block_contour is None or cv2.contourArea(
-                    c
-                ) > cv2.contourArea(student_id_block_contour):
-                    student_id_block_contour = c
-                    continue
-
-            if (
-                0.05 < aspect_ratio < 0.6
-                and h > h_img * 0.5
-                and 0.008 < area_ratio < 0.15
-            ):
-                answer_column_contours.append(c)
-
-        return student_id_block_contour, answer_column_contours
-
-    def detect_grid_lines(self, binary_image):
-        h, w = binary_image.shape
-
-        # ปรับขนาด kernel ให้เหมาะสมกับขนาดรูป
-        h_kernel_size = max(1, min(w // 20, 50))  # จำกัดขนาดสูงสุด
-        v_kernel_size = max(1, min(h // 20, 50))  # จำกัดขนาดสูงสุด
-
-        horizontal_kernel = cv2.getStructuringElement(
-            cv2.MORPH_RECT, (h_kernel_size, 1)
-        )
-        horizontal_lines = cv2.erode(binary_image, horizontal_kernel, iterations=1)
-
-        vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_kernel_size))
-        vertical_lines = cv2.erode(binary_image, vertical_kernel, iterations=1)
-
-        h_lines = self._extract_line_positions(horizontal_lines, axis=0)
-        v_lines = self._extract_line_positions(vertical_lines, axis=1)
-
-        return h_lines, v_lines
-
-    def _extract_line_positions(self, line_image, axis):
-        projection = np.sum(line_image, axis=1 if axis == 0 else 0)
-        if projection.max() == 0:
-            return []
-
-        threshold = projection.max() * 0.1
-        peaks = np.where(projection > threshold)[0]
-        if len(peaks) == 0:
-            return []
-
-        grouped_peaks, current_group = [], [peaks[0]]
-        group_distance = 5
-        for peak in peaks[1:]:
-            if peak - current_group[-1] <= group_distance:
-                current_group.append(peak)
-            else:
-                grouped_peaks.append(int(np.median(current_group)))
-                current_group = [peak]
-        grouped_peaks.append(int(np.median(current_group)))
-
-        return sorted(grouped_peaks)
-
-    def create_grid_from_lines(self, h_lines, v_lines, num_questions, num_choices):
-        if len(h_lines) < num_questions + 3 or len(v_lines) < num_choices + 2:
-            app_logger.warning(
-                f"Answer Grid Line Detection Failed: Found {len(h_lines)} h_lines and {len(v_lines)} v_lines. Required h>={num_questions+3}, v>={num_choices+2}."
-            )
-            return None
-
-        answer_boxes = []
-        answer_area_h_lines = h_lines[3:]
-        answer_area_v_lines = v_lines[1:]
-
-        if (
-            len(answer_area_h_lines) <= num_questions
-            or len(answer_area_v_lines) <= num_choices
-        ):
-            app_logger.warning(
-                f"Answer Grid Slicing Failed: Got {len(answer_area_h_lines)} answer_h_lines and {len(answer_area_v_lines)} answer_v_lines. Required h>{num_questions}, v>{num_choices}."
-            )
-            return None
-
-        for i in range(num_questions):
-            row_boxes = []
-            for j in range(num_choices):
-                if (i + 1) < len(answer_area_h_lines) and (j + 1) < len(
-                    answer_area_v_lines
-                ):
-                    y1, y2 = answer_area_h_lines[i], answer_area_h_lines[i + 1]
-                    x1, x2 = answer_area_v_lines[j], answer_area_v_lines[j + 1]
-
-                    margin_ratio = 0.20
-                    cell_w = x2 - x1
-                    cell_h = y2 - y1
-
-                    x_margin = int(cell_w * margin_ratio)
-                    y_margin = int(cell_h * margin_ratio)
-
-                    roi_x = x1 + x_margin
-                    roi_y = y1 + y_margin
-                    roi_w = cell_w - (2 * x_margin)
-                    roi_h = cell_h - (2 * y_margin)
-
-                    if roi_w > 0 and roi_h > 0:
-                        row_boxes.append((roi_x, roi_y, roi_w, roi_h))
-
-            if len(row_boxes) == num_choices:
-                answer_boxes.append(row_boxes)
-
-        return answer_boxes
-
-    # ...existing code...
-    def create_id_grid_from_lines(self, h_lines, v_lines):
-        # สำหรับรหัสนักศึกษา 12 หลัก จะต้องมี 12 ช่องตัวเลข (ต้องการ 13 เส้น)
-        # และเมื่อรวมเส้นขอบซ้าย-ขวา จะเป็นประมาณ 14 เส้น
-        # สำหรับตัวเลข 0-9 จะต้องมี 10 ช่อง (ต้องการ 11 เส้น) และเมื่อรวมเส้นหัวตารางจะประมาณ 13 เส้น
-        if len(h_lines) < 13 or len(v_lines) < 14:
-            app_logger.warning(
-                f"ID Grid Line Detection Failed: Found {len(h_lines)} h_lines and {len(v_lines)} v_lines. Required h>=13, v>=14 for 12-digit ID."
-            )
-            return None
-
-        all_digits_boxes = []
-        # ใช้ v_lines[1:] เพื่อเอา 12 ช่องเลขนักศึกษา (index 1 ถึง 12)
-        # หาก v_lines มี 14 เส้น เมื่อตัด v_lines[1:] จะเหลือ 13 เส้น ซึ่งพอดีกับการสร้าง 12 ช่อง
-        digit_v_lines = v_lines[1:]
-        digit_h_lines = h_lines[2:]
-
-        if len(digit_h_lines) < 11 or len(digit_v_lines) < 13:
-            app_logger.warning(
-                f"ID Grid Slicing Failed: Got {len(digit_h_lines)} digit_h_lines and {len(digit_v_lines)} digit_v_lines. Required h>=11, v>=13."
-            )
-            return None
-
-        for i in range(12): # วนลูป 12 ครั้งสำหรับรหัส 12 หลัก
-            boxes_in_digit_col = []
-            for j in range(10): # วนลูป 10 ครั้งสำหรับตัวเลข 0-9
-                if (i + 1) < len(digit_v_lines) and (j + 1) < len(digit_h_lines):
-                    x1, x2 = digit_v_lines[i], digit_v_lines[i + 1]
-                    y1, y2 = digit_h_lines[j], digit_h_lines[j + 1]
-
-                    margin_ratio = 0.20
-                    cell_w = x2 - x1
-                    cell_h = y2 - y1
-
-                    x_margin = int(cell_w * margin_ratio)
-                    y_margin = int(cell_h * margin_ratio)
-
-                    roi_x = x1 + x_margin
-                    roi_y = y1 + y_margin
-                    roi_w = cell_w - (2 * x_margin)
-                    roi_h = cell_h - (2 * y_margin)
-
-                    if roi_w > 0 and roi_h > 0:
-                        boxes_in_digit_col.append((roi_x, roi_y, roi_w, roi_h))
-
-            all_digits_boxes.append(boxes_in_digit_col)
-
-        return all_digits_boxes
-    # ...existing code...
-
-    def detect_marked_answer(self, thresh_image, boxes):
-        if not boxes:
-            return 0
-
-        scores = []
-        for x, y, w, h in boxes:
-            if w <= 0 or h <= 0:
-                scores.append(0)
-                continue
-            roi = thresh_image[y : y + h, x : x + w]
-            density = cv2.countNonZero(roi) / roi.size if roi.size > 0 else 0
-            scores.append(density)
-
-        if not scores or max(scores) < 0.20:
-            return 0
-
-        max_choice = np.argmax(scores) + 1
-        return max_choice
-
-    def adaptive_threshold_for_sheet(self, gray_image):
-        blurred = cv2.GaussianBlur(gray_image, (5, 5), 0)
-        return cv2.adaptiveThreshold(
-            blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 5
-        )
-
-    def overlay_warped_region(self, base_image, warped_region, corners):
-        try:
-            mask = np.zeros(base_image.shape[:2], dtype=np.uint8)
-            cv2.fillPoly(mask, [corners.astype(np.int32)], 255)
-            h, w = warped_region.shape[:2]
-            rect = np.zeros((4, 2), dtype="float32")
-            s = corners.sum(axis=1)
-            rect[0] = corners[np.argmin(s)]
-            rect[2] = corners[np.argmax(s)]
-            diff = np.diff(corners, axis=1)
-            rect[1] = corners[np.argmin(diff)]
-            rect[3] = corners[np.argmax(diff)]
-            src_corners = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32)
-            M = cv2.getPerspectiveTransform(src_corners, rect)
-            transformed_back = cv2.warpPerspective(
-                warped_region, M, (base_image.shape[1], base_image.shape[0])
-            )
-            mask_inv = cv2.bitwise_not(mask)
-            img_bg = cv2.bitwise_and(base_image, base_image, mask=mask_inv)
-            img_fg = cv2.bitwise_and(transformed_back, transformed_back, mask=mask)
-            combined_image = cv2.add(img_bg, img_fg)
-            return combined_image
-        except Exception as e:
-            app_logger.error(f"Error in overlay_warped_region: {e}")
-            return base_image
-
-    def find_and_process_sheet(
-        self,
-        image_bytes,
-        sheet_filename,
-        mode="single",
-        single_answer_key=None,
-        multi_answer_key=None,
-        session_debug_folder="debug_output",
-    ):
-        start_time = time.time()
-        npimg = np.frombuffer(image_bytes, np.uint8)
-        original_image = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
-        if original_image is None:
-            raise ValueError("ไม่สามารถอ่านไฟล์ภาพได้")
-
-        height, width = original_image.shape[:2]
-        if max(height, width) > 2000:
-            scale = 2000 / max(height, width)
-            original_image = cv2.resize(
-                original_image,
-                (int(width * scale), int(height * scale)),
-                interpolation=cv2.INTER_AREA,
-            )
-
-        gray = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
-        thresh = self.adaptive_threshold_for_sheet(gray)
-        all_contours, _ = cv2.findContours(
-            thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-        all_contours = [
-            c
-            for c in all_contours
-            if cv2.contourArea(c)
-            > (original_image.shape[0] * original_image.shape[1] * 0.001)
-        ]
-        id_block_contour, column_contours = self.find_main_blocks(
-            all_contours, original_image.shape
-        )
-        if id_block_contour is None:
-            raise ValueError("ไม่พบบล็อกรหัสนักศึกษา")
-        if len(column_contours) != 4:
-            raise ValueError(f"ไม่สามารถหาคอลัมน์ทั้ง 4 คอลัมน์ได้ (พบ {len(column_contours)})")
-        column_contours = contours.sort_contours(
-            column_contours, method="left-to-right"
-        )[0]
-
-        student_id = ""
-        debug_blocks_image = original_image.copy()
-        highlighted_image = original_image.copy()
-
-        box_id = cv2.boxPoints(cv2.minAreaRect(id_block_contour)).astype("int")
-        cv2.drawContours(debug_blocks_image, [box_id], 0, (0, 255, 0), 2)
-        warped_id_thresh = four_point_transform(thresh, box_id.reshape(4, 2))
-        warped_id_color = four_point_transform(original_image, box_id.reshape(4, 2))
-        warped_id_highlighted = four_point_transform(
-            highlighted_image, box_id.reshape(4, 2)
-        )
-
-        if warped_id_color.shape[0] > warped_id_color.shape[1] * 1.5:
-            warped_id_thresh = cv2.rotate(warped_id_thresh, cv2.ROTATE_90_CLOCKWISE)
-            warped_id_color = cv2.rotate(warped_id_color, cv2.ROTATE_90_CLOCKWISE)
-            warped_id_highlighted = cv2.rotate(
-                warped_id_highlighted, cv2.ROTATE_90_CLOCKWISE
-            )
-
-        id_grid = self.create_id_grid_from_lines(
-            *self.detect_grid_lines(warped_id_thresh)
-        )
-        if not id_grid or len(id_grid) != 12:
-            student_id = "Error Reading ID"
-        else:
-            for digit_boxes in id_grid:
-                marked_row = self.detect_marked_answer(warped_id_thresh, digit_boxes)
-                student_id += str(marked_row - 1) if marked_row > 0 else "-"
-                if marked_row > 0:
-                    idx = marked_row - 1
-                    b = digit_boxes[idx]
-                    cv2.rectangle(
-                        warped_id_highlighted,
-                        (b[0], b[1]),
-                        (b[0] + b[2], b[1] + b[3]),
-                        (0, 0, 255),
-                        3,
-                    )
-
-        highlighted_image = self.overlay_warped_region(
-            highlighted_image, warped_id_highlighted, box_id.reshape(4, 2)
-        )
-        if self.debug_mode:
-            # <-- FIX 1: แก้ไข Path ของไฟล์ Debug ย่อยให้ถูกต้อง
-            cv2.imwrite(
-                os.path.join(
-                    session_debug_folder, f"DEBUG_{sheet_filename}_id_block_result.png"
-                ),
-                warped_id_color,
-            )
-
-        question_counter = 1
-        all_answers_data = {}
-        for j, col_contour in enumerate(column_contours):
-            box = cv2.boxPoints(cv2.minAreaRect(col_contour)).astype("int")
-            cv2.drawContours(debug_blocks_image, [box], 0, (0, 255, 0), 2)
-            warped_col_thresh = four_point_transform(thresh, box.reshape(4, 2))
-            warped_col_color = four_point_transform(original_image, box.reshape(4, 2))
-            warped_col_highlighted = four_point_transform(
-                highlighted_image, box.reshape(4, 2)
-            )
-
-            if warped_col_color.shape[1] > warped_col_color.shape[0]:
-                warped_col_thresh = cv2.rotate(
-                    warped_col_thresh, cv2.ROTATE_90_COUNTERCLOCKWISE
-                )
-                warped_col_color = cv2.rotate(
-                    warped_col_color, cv2.ROTATE_90_COUNTERCLOCKWISE
-                )
-                warped_col_highlighted = cv2.rotate(
-                    warped_col_highlighted, cv2.ROTATE_90_COUNTERCLOCKWISE
-                )
-
-            box_rows_in_col = self.create_grid_from_lines(
-                *self.detect_grid_lines(warped_col_thresh), 30, 5
-            )
-            if not box_rows_in_col or len(box_rows_in_col) != 30:
-                for _ in range(30):
-                    all_answers_data[question_counter] = {
-                        "answers": set(),
-                        "status": "incorrect",
-                    }
-                    question_counter += 1
-                continue
-
-            for boxes_for_this_question in box_rows_in_col:
-                densities = [
-                    cv2.countNonZero(warped_col_thresh[y : y + h, x : x + w])
-                    / ((w * h) or 1)
-                    for (x, y, w, h) in boxes_for_this_question
-                ]
-                student_answers_set = {
-                    idx + 1 for idx, density in enumerate(densities) if density > 0.20
-                }
-                highlight_color, status = (0, 0, 255), "incorrect"
-                has_multiple_answers = len(student_answers_set) > 1  # ตรวจจับการกาหลายคำตอบ
-                
-                if mode == "single":
-                    correct_answer = single_answer_key.get(question_counter)
-                    if (
-                        len(student_answers_set) == 1
-                        and list(student_answers_set)[0] == correct_answer
-                    ):
-                        highlight_color, status = (0, 255, 0), "correct"
-                    elif has_multiple_answers:
-                        status = "multiple_answers"  # สถานะใหม่สำหรับการกาหลายคำตอบ
-                else:  # multi
-                    correct_answers_set = multi_answer_key.get(question_counter, set())
-                    if not correct_answers_set:
-                        status = "no_key"
-                    elif student_answers_set == correct_answers_set:
-                        highlight_color, status = (0, 255, 0), "correct"
-                    elif student_answers_set and student_answers_set.issubset(
-                        correct_answers_set
-                    ):
-                        highlight_color, status = (0, 255, 255), "partial"
-                all_answers_data[question_counter] = {
-                    "answers": student_answers_set,
-                    "status": status,
-                    "has_multiple_answers": has_multiple_answers,  # เพิ่มข้อมูลนี้
-                }
-                for choice_idx, b in enumerate(boxes_for_this_question):
-                    if (choice_idx + 1) in student_answers_set:
-                        cv2.rectangle(
-                            warped_col_highlighted,
-                            (b[0], b[1]),
-                            (b[0] + b[2], b[1] + b[3]),
-                            highlight_color,
-                            3,
-                        )
-                question_counter += 1
-
-            highlighted_image = self.overlay_warped_region(
-                highlighted_image, warped_col_highlighted, box.reshape(4, 2)
-            )
-            if self.debug_mode:
-                # <-- FIX 1: แก้ไข Path ของไฟล์ Debug ย่อยให้ถูกต้อง
-                cv2.imwrite(
-                    os.path.join(
-                        session_debug_folder,
-                        f"DEBUG_{sheet_filename}_col_{j+1}_result.png",
-                    ),
-                    warped_col_color,
-                )
-
-        if self.debug_mode:
-            cv2.imwrite(
-                os.path.join(
-                    session_debug_folder,
-                    f"DEBUG_{mode}_{sheet_filename}_blocks_detected.png",
-                ),
-                debug_blocks_image,
-            )
-
-        highlighted_filename = f"highlighted_{mode}_{sheet_filename}.png"
-        highlighted_filepath = os.path.join(session_debug_folder, highlighted_filename)
-        cv2.imwrite(highlighted_filepath, highlighted_image)
-        
-        # สร้างเวอร์ชันเว็บของรูปภาพที่ highlight แล้ว
-        web_highlighted_filename = f"web_{highlighted_filename}"
-        web_highlighted_filepath = os.path.join(session_debug_folder, web_highlighted_filename)
-        
-        # แปลง OpenCV image เป็น PIL Image
-        highlighted_rgb = cv2.cvtColor(highlighted_image, cv2.COLOR_BGR2RGB)
-        highlighted_pil = Image.fromarray(highlighted_rgb)
-        
-        # สร้างเวอร์ชันเว็บที่บีบอัดแล้ว
-        web_image_data = create_web_optimized_image(highlighted_pil, max_width=800, quality=60)
-        with open(web_highlighted_filepath, 'wb') as f:
-            f.write(web_image_data)
-
-        app_logger.info(
-            f"Processing time for {sheet_filename}: {time.time() - start_time:.2f} seconds"
-        )
-        return student_id, all_answers_data, web_highlighted_filename
-
-
 omr_system = OMRSystemFinal()
 
-
-# === Helper Functions for Session and Answer Key Management ===
-def get_session_data():
-    try:
-        config_path = get_session_path("config")
-        session_file = os.path.join(config_path, "session_data.json")
-        if os.path.exists(session_file):
-            with open(session_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except (ValueError, FileNotFoundError):
-        return {}
-    except json.JSONDecodeError:
-        return {}
-    return {}
-
-
-# === ฟังก์ชัน Helper ใหม่ สำหรับจัดการ Session Path ===
-def get_session_path(folder_type):
-    if "session_id" not in session:
-        raise ValueError("Cannot get session path without an active session.")
-    session_id = session["session_id"]
-    base_folder = ""
-    if folder_type == "uploads":
-        base_folder = app.config["UPLOAD_FOLDER"]
-    elif folder_type == "debug_output":
-        base_folder = DEBUG_FOLDER
-    elif folder_type == "config":
-        base_folder = STATIC_FOLDER
-    else:
-        raise ValueError(f"Unknown folder type: {folder_type}")
-    session_specific_path = os.path.join(base_folder, session_id)
-    if not os.path.exists(session_specific_path):
-        os.makedirs(session_specific_path)
-        app_logger.info(f"Created session directory: {session_specific_path}")
-    return session_specific_path
-
-
-GLOBAL_SESSION_FILE = os.path.join(STATIC_FOLDER, "global_sessions.json")
-
-
-def get_global_session_list():
-    if os.path.exists(GLOBAL_SESSION_FILE):
-        try:
-            with open(GLOBAL_SESSION_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
-
-def save_global_session_list(data):
-    with open(GLOBAL_SESSION_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-
-# === Heartbeat and Cleanup ===
-HEARTBEAT_TIMEOUT_SECONDS = 5 * 60  # 5 minutes
 
 def _utcnow_iso():
     return datetime.now().isoformat()
@@ -856,95 +121,6 @@ def heartbeat():
     except Exception as e:
         app_logger.error(f"Heartbeat error: {e}")
         return jsonify({"success": False}), 500
-
-
-def _cleanup_session_directories(session_id: str):
-    paths_to_delete = [
-        os.path.join(app.config["UPLOAD_FOLDER"], session_id),
-        os.path.join(DEBUG_FOLDER, session_id),
-        os.path.join(STATIC_FOLDER, session_id),
-    ]
-    for path in paths_to_delete:
-        if os.path.exists(path):
-            try:
-                shutil.rmtree(path)
-                app_logger.info(f"Removed idle session directory: {path}")
-            except Exception as e:
-                app_logger.error(f"Failed to delete directory {path}. Reason: {e}")
-
-
-def _cleanup_inactive_sessions_loop():
-    check_interval = 60  # seconds
-    while True:
-        try:
-            global_sessions = get_global_session_list()
-            active_sessions = global_sessions.get("active_sessions", {})
-            if not active_sessions:
-                time.sleep(check_interval)
-                continue
-
-            now_ts = time.time()
-            to_remove = []
-            for sid, meta in list(active_sessions.items()):
-                last_activity_iso = meta.get("last_activity")
-                try:
-                    last_ts = datetime.fromisoformat(last_activity_iso).timestamp() if last_activity_iso else 0
-                except Exception:
-                    last_ts = 0
-                if now_ts - last_ts > HEARTBEAT_TIMEOUT_SECONDS:
-                    to_remove.append(sid)
-
-            for sid in to_remove:
-                app_logger.info(f"Cleaning up inactive session: {sid}")
-                _cleanup_session_directories(sid)
-                active_sessions.pop(sid, None)
-
-            if to_remove:
-                global_sessions["active_sessions"] = active_sessions
-                save_global_session_list(global_sessions)
-        except Exception as e:
-            app_logger.error(f"Cleanup loop error: {e}")
-        finally:
-            time.sleep(check_interval)
-
-import threading
-CLEANUP_THREAD_STARTED = False
-
-
-
-def save_session_data(data):
-    try:
-        config_path = get_session_path("config")
-        session_file = os.path.join(config_path, "session_data.json")
-        with open(session_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except ValueError:
-        app_logger.error("Attempted to save session data without an active session.")
-
-
-def load_answer_key(mode):
-    try:
-        config_path = get_session_path("config")
-        key_path = os.path.join(config_path, f"answer_key_{mode}.csv")
-    except ValueError:
-        return None, "No active session to load answer key from."
-
-    if not os.path.exists(key_path):
-        return None, f"ไม่พบไฟล์เฉลยสำหรับโหมด {mode}"
-
-    key_dict = {}
-    try:
-        df = pd.read_csv(key_path, header=None, dtype=str)
-        for _, row in df.iterrows():
-            q_num = int(row[0])
-            answers_str = str(row[1])
-            if mode == "single":
-                key_dict[q_num] = int(answers_str)
-            else:  # multi
-                key_dict[q_num] = {int(ans) for ans in answers_str.split("&")}
-        return key_dict, None
-    except Exception as e:
-        return None, f"ผิดพลาดในการอ่านไฟล์เฉลย {mode}: {e}"
 
 
 @app.route("/toggle_debug", methods=["POST"])
@@ -1030,7 +206,7 @@ def process_single():
             student_names = dict(
                 zip(
                     df_students[0].astype(str).str.strip(),
-                    (df_students[1].astype(str).str.strip() + ' ' + df_students[2].astype(str).str.strip()).str.strip()
+                    (df_students[1].astype(str).str.strip(), df_students[2].astype(str).str.strip())
                 )
             )
         except Exception as e:
@@ -1086,23 +262,7 @@ def process_single():
                     multiple_answers_count += 1
             session_data["single_detailed_answers"][student_id] = serializable_answers
 
-            score = sum(
-                1 for data in answered_data.values() if data.get("status") == "correct"
-            )
-            student_name = student_names.get(str(student_id), "ไม่พบชื่อ")
-            # Extract fname and lname from df_students if possible
-            fname = ""
-            lname = ""
-            if str(student_id) in df_students[0].astype(str).values:
-                row = df_students[df_students[0].astype(str).str.strip() == str(student_id)]
-                if not row.empty:
-                    fname = str(row.iloc[0,1]).strip()
-                    lname = str(row.iloc[0,2]).strip() if len(row.columns) > 2 else ""
-            if not fname and student_name != "ไม่พบชื่อ" and " " in student_name:
-                fname, lname = student_name.split(" ", 1)
-            elif not fname:
-                fname = student_name
-            
+            first_name, last_name, score = process_data(student_id, student_names, answered_data)
             # ตรวจสอบรหัสซ้ำ
             is_duplicate = False
             if str(student_id) in seen_student_ids:
@@ -1116,9 +276,9 @@ def process_single():
                 {
                     "student_file": original_filename,
                     "student_id": student_id,
-                    "student_name": f"{fname} {lname}".strip(),  # แสดงชื่อ+นามสกุลในคอลัมเดียว
-                    "fname": fname,
-                    "lname": lname,
+                    "student_name": f"{first_name} {last_name}".strip(),  # แสดงชื่อ+นามสกุลในคอลัมเดียว
+                    "fname": first_name,
+                    "lname": last_name,
                     "score": score,
                     "total": len(answer_key),
                     "image_url": f"/debug_output/{session['session_id']}/{h_file}",  # ใช้รูปภาพที่บีบอัดแล้ว
@@ -1305,7 +465,7 @@ def process_multi():
             student_names = dict(
                 zip(
                     df_students[0].astype(str).str.strip(),
-                    (df_students[1].astype(str).str.strip() + ' ' + df_students[2].astype(str).str.strip()).str.strip()
+                    (df_students[1].astype(str).str.strip(), df_students[2].astype(str).str.strip())
                 )
             )
         except Exception as e:
@@ -1359,23 +519,7 @@ def process_multi():
                 }
                 # ใน multi mode การกาหลายคำตอบเป็นเรื่องปกติ ไม่นับเป็นปัญหา
             session_data["multi_detailed_answers"][student_id] = serializable_answers
-
-            score = sum(
-                1 for data in answered_data.values() if data.get("status") == "correct"
-            )
-            student_name = student_names.get(str(student_id), "ไม่พบชื่อ")
-            # Extract fname and lname from df_students if possible
-            fname = ""
-            lname = ""
-            if str(student_id) in df_students[0].astype(str).values:
-                row = df_students[df_students[0].astype(str).str.strip() == str(student_id)]
-                if not row.empty:
-                    fname = str(row.iloc[0,1]).strip()
-                    lname = str(row.iloc[0,2]).strip() if len(row.columns) > 2 else ""
-            if not fname and student_name != "ไม่พบชื่อ" and " " in student_name:
-                fname, lname = student_name.split(" ", 1)
-            elif not fname:
-                fname = student_name
+            first_name, last_name, score = process_data(student_id, student_names, answered_data)
             
             # ตรวจสอบรหัสซ้ำ
             is_duplicate = False
@@ -1389,9 +533,9 @@ def process_multi():
             result_item = {
                 "student_file": original_filename,
                 "student_id": student_id,
-                "student_name": f"{fname} {lname}".strip(),
-                "fname": fname,
-                "lname": lname,
+                "student_name": f"{first_name} {last_name}".strip(),
+                "fname": first_name,
+                "lname": last_name,
                 "score": score,
                 "total": len(answer_key),
                 "image_url": f"/debug_output/{session['session_id']}/{h_file}",
@@ -1495,17 +639,6 @@ def process_multi():
 
     return jsonify({"results": results})
 
-
-def clear_folder(folder_path):
-    if not os.path.exists(folder_path):
-        return
-    for filename in os.listdir(folder_path):
-        file_path = os.path.join(folder_path, filename)
-        try:
-            if os.path.isfile(file_path) or os.path.islink(file_path):
-                os.unlink(file_path)
-        except Exception as e:
-            app_logger.error(f"Failed to delete {file_path}. Reason: {e}")
 
 
 # Middleware สำหรับ log การเข้าถึง
@@ -1663,11 +796,6 @@ def new_session():
 
     msg = json.dumps({"event": "clear"})
     announcer.announce(msg=f"data: {msg}\n\n")
-
-    # session.clear()
-    # app_logger.info(
-    #     "Session data cleared. A new session will be generated on next request."
-    # )
 
     return jsonify({"message": "Current session data cleared. Please reload the page."})
 
@@ -2381,15 +1509,11 @@ def download_template():
 
 @app.route("/check_pdf_support", methods=["GET"])
 def check_pdf_support():
-    """ตรวจสอบว่าระบบรองรับการแปลง PDF หรือไม่"""
-    poppler_installed = check_poppler_installation()
     return jsonify(
         {
-            "pdf_supported": poppler_installed,
+            "pdf_supported": True,
             "message": (
                 "PDF conversion is supported"
-                if poppler_installed
-                else "Poppler is not installed"
             ),
         }
     )
@@ -2400,126 +1524,6 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def check_poppler_installation():
-    """ตรวจสอบว่า Poppler ติดตั้งแล้วหรือไม่"""
-    try:
-        import subprocess
-
-        # เพิ่ม path ของ poppler ที่เราติดตั้งไว้
-        poppler_path = os.path.join(
-            os.getcwd(), "poppler", "poppler-24.08.0", "Library", "bin"
-        )
-        if os.path.exists(poppler_path):
-            os.environ["PATH"] = poppler_path + os.pathsep + os.environ.get("PATH", "")
-
-        result = subprocess.run(
-            ["pdftoppm", "-h"], capture_output=True, text=True, timeout=5
-        )
-        return True
-    except (
-        subprocess.TimeoutExpired,
-        subprocess.CalledProcessError,
-        FileNotFoundError,
-    ):
-        return False
-
-
-def create_web_optimized_image(pil_image, max_width=800, quality=60):
-    """
-    สร้างรูปภาพที่ปรับขนาดและบีบอัดสำหรับแสดงผลบนเว็บ
-    """
-    # คำนวณขนาดใหม่โดยรักษาอัตราส่วน
-    width, height = pil_image.size
-    if width > max_width:
-        ratio = max_width / width
-        new_width = max_width
-        new_height = int(height * ratio)
-        pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-    
-    # บันทึกเป็น JPEG ที่บีบอัดแล้ว
-    buffer = io.BytesIO()
-    pil_image.save(buffer, format='JPEG', quality=quality, optimize=True)
-    return buffer.getvalue()
-
-
-def convert_pdf_to_images(pdf_bytes, original_filename, save_path):
-    try:
-        if not check_poppler_installation():
-            raise ValueError("ระบบขาด Poppler - กรุณาติดตั้ง Poppler ก่อนใช้งานฟีเจอร์ PDF")
-
-        # แปลง PDF เป็นรูปภาพ DPI สูงสำหรับการประมวลผล
-        images = convert_from_bytes(pdf_bytes, dpi=300, fmt="jpeg")
-        if not images:
-            raise ValueError("ไม่พบหน้าใดๆ ในไฟล์ PDF")
-
-        converted_files = []
-        base_filename = os.path.splitext(original_filename)[0]
-
-        for i, image in enumerate(images, 1):
-            page_filename = f"{base_filename}_page_{i:03d}.jpg"
-            saved_filename = f"{uuid.uuid4().hex}_{page_filename}"
-            
-            # บันทึกรูปภาพต้นฉบับ DPI สูงสำหรับการประมวลผล
-            original_filepath = os.path.join(save_path, saved_filename)
-            image.save(original_filepath, "JPEG", quality=95)
-            
-            # สร้างรูปภาพเวอร์ชันเว็บที่บีบอัดแล้ว
-            web_filename = f"web_{saved_filename}"
-            web_filepath = os.path.join(save_path, web_filename)
-            web_image_data = create_web_optimized_image(image, max_width=800, quality=60)
-            
-            with open(web_filepath, 'wb') as f:
-                f.write(web_image_data)
-
-            converted_files.append(
-                {
-                    "original_name": page_filename,
-                    "saved_name": saved_filename,
-                    "web_name": web_filename,  # เพิ่มชื่อไฟล์เวอร์ชันเว็บ
-                    "url": f"/uploads/{session['session_id']}/{web_filename}",  # ใช้เวอร์ชันเว็บสำหรับแสดงผล
-                    "original_url": f"/uploads/{session['session_id']}/{saved_filename}",  # เก็บ URL ต้นฉบับไว้สำหรับประมวลผล
-                }
-            )
-
-        app_logger.info(
-            f"Converted PDF '{original_filename}' to {len(converted_files)} images (with web optimization)"
-        )
-        return converted_files
-    except Exception as e:
-        app_logger.error(f"Error converting PDF '{original_filename}': {e}")
-        raise ValueError(f"ไม่สามารถแปลงไฟล์ PDF ได้: {str(e)}")
-
-
-def clean_image_file(filepath):
-    """
-    อ่านไฟล์ภาพ, ใช้ adaptive thresholding เพื่อทำให้พื้นหลังขาวสะอาด,
-    และเขียนทับไฟล์เดิม
-    """
-    try:
-        image = cv2.imread(filepath)
-        if image is None:
-            app_logger.error(f"Could not read image for cleaning: {filepath}")
-            return False
-
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        cleaned_image = cv2.adaptiveThreshold(
-            gray,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            blockSize=31,
-            C=15,
-        )
-
-        cleaned_bgr = cv2.cvtColor(cleaned_image, cv2.COLOR_GRAY2BGR)
-
-        cv2.imwrite(filepath, cleaned_bgr)
-        app_logger.info(f"Successfully cleaned image: {os.path.basename(filepath)}")
-        return True
-    except Exception as e:
-        app_logger.error(f"Error cleaning image {os.path.basename(filepath)}: {e}")
-        return False
 
 
 @app.route("/clean_images", methods=["POST"])

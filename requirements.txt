@@ -1,5 +1,5 @@
-blinker 
-Brotli 
+opencv-python
+blinker
 certifi 
 chardet
 charset-normalizer 
@@ -9,13 +9,11 @@ Flask
 Flask-Compress
 idna 
 imutils 
-itsdangerous 
-Jinja2 
+itsdangerous
 MarkupSafe 
 numpy 
 opencv-python-headless 
-pandas 
-pdf2image 
+pandas
 Pillow 
 pip 
 python-dateutil 
@@ -28,3 +26,5 @@ tzdata
 urllib3 
 Werkzeug
 python-dotenv
+netifaces
+PyMuPDF
