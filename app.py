@@ -24,13 +24,13 @@ from flask import (
 )
 from flask_compress import Compress
 
-from file_manager import clear_folder
-from image_util import convert_pdf_to_images, create_web_optimized_image, clean_image_file
-from omr import OMRSystemFinal
-from logging_manager import setup_logging
-from session_manager import get_session_path, get_session_data, get_global_session_list, save_global_session_list, \
+from manager.file_manager import clear_folder
+from manager.image_util import convert_pdf_to_images, create_web_optimized_image, clean_image_file
+from manager.omr import OMRSystemFinal
+from manager.logging_manager import setup_logging
+from manager.session_manager import get_session_path, get_session_data, get_global_session_list, save_global_session_list, \
     _cleanup_inactive_sessions_loop, process_data, load_answer_key, save_session_data
-from web_util import get_base_url, get_local_ip
+from manager.web_util import get_base_url, get_local_ip
 
 import threading
 

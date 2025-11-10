@@ -5,7 +5,7 @@ import cv2
 from PIL import Image
 from flask import session
 
-from logging_manager import get_logger
+from manager.logging_manager import get_logger
 
 
 def create_web_optimized_image(pil_image, max_width=800, quality=60):

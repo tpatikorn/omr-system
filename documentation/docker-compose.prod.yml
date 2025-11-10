@@ -18,7 +18,7 @@ services:
       - FLASK_DEBUG=False
       - FLASK_ENV=production
     env_file:
-      - .env
+      - ../.env
     restart: unless-stopped
     networks:
       - omr-network
