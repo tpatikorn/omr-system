@@ -1,0 +1,153 @@
+/* Styles for separated result tables */
+
+/* Section headers for unmatched and matched tables */
+#unmatched-section-single h4,
+#unmatched-section-multi h4,
+#matched-section-single h4,
+#matched-section-multi h4 {
+    margin: 0 0 15px 0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+}
+
+/* Unmatched section styling */
+#unmatched-section-single h4,
+#unmatched-section-multi h4 {
+    background: rgba(239, 68, 68, 0.1);
+    color: #dc2626;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Matched section styling */
+#matched-section-single h4,
+#matched-section-multi h4 {
+    background: rgba(16, 185, 129, 0.1);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+/* Table spacing between sections */
+#unmatched-section-single,
+#unmatched-section-multi {
+    margin-bottom: 30px;
+}
+
+#matched-section-single,
+#matched-section-multi {
+    margin-top: 20px;
+}
+
+/* Unmatched table styling */
+#unmatched-table-single,
+#unmatched-table-multi {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    table-layout: fixed;
+    border: 2px solid rgba(239, 68, 68, 0.2);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* Unmatched table headers */
+#unmatched-table-single th,
+#unmatched-table-multi th {
+    background: rgba(239, 68, 68, 0.05);
+    color: #dc2626;
+    font-weight: 600;
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Unmatched table cells */
+#unmatched-table-single td,
+#unmatched-table-multi td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid rgba(239, 68, 68, 0.1);
+    background: rgba(239, 68, 68, 0.02);
+}
+
+/* Unmatched table rows hover effect */
+#unmatched-table-single tbody tr:hover,
+#unmatched-table-multi tbody tr:hover {
+    background: rgba(239, 68, 68, 0.05);
+}
+
+/* Column widths for unmatched tables */
+#unmatched-table-single th:nth-child(1),
+#unmatched-table-single td:nth-child(1),
+#unmatched-table-multi th:nth-child(1),
+#unmatched-table-multi td:nth-child(1) {
+    width: 80px;
+    text-align: center;
+}
+
+#unmatched-table-single th:nth-child(2),
+#unmatched-table-single td:nth-child(2),
+#unmatched-table-multi th:nth-child(2),
+#unmatched-table-multi td:nth-child(2) {
+    width: 30%;
+}
+
+#unmatched-table-single th:nth-child(3),
+#unmatched-table-single td:nth-child(3),
+#unmatched-table-multi th:nth-child(3),
+#unmatched-table-multi td:nth-child(3) {
+    width: 20%;
+    text-align: center;
+}
+
+#unmatched-table-single th:nth-child(4),
+#unmatched-table-single td:nth-child(4),
+#unmatched-table-multi th:nth-child(4),
+#unmatched-table-multi td:nth-child(4) {
+    width: 15%;
+    text-align: center;
+}
+
+#unmatched-table-single th:nth-child(5),
+#unmatched-table-single td:nth-child(5),
+#unmatched-table-multi th:nth-child(5),
+#unmatched-table-multi td:nth-child(5) {
+    width: 15%;
+    text-align: center;
+}
+
+/* Enhanced styling for error indicators in unmatched tables */
+#unmatched-table-single .result-image,
+#unmatched-table-multi .result-image {
+    border: 2px solid rgba(239, 68, 68, 0.3);
+}
+
+#unmatched-table-single .result-image:hover,
+#unmatched-table-multi .result-image:hover {
+    border-color: #dc2626;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+    #unmatched-section-single h4,
+    #unmatched-section-multi h4,
+    #matched-section-single h4,
+    #matched-section-multi h4 {
+        font-size: 0.9rem;
+        padding: 6px 10px;
+    }
+    
+    #unmatched-table-single,
+    #unmatched-table-multi {
+        font-size: 0.8rem;
+    }
+    
+    #unmatched-table-single th,
+    #unmatched-table-single td,
+    #unmatched-table-multi th,
+    #unmatched-table-multi td {
+        padding: 8px;
+    }
+}

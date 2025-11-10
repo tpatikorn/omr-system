@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>อัปโหลดภาพกระดาษคำตอบ - ระบบ OMR</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/shared.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Specific styles for upload page */
+        html,
+        body {
+            background: var(--background-primary);
+            height: 100%;
+        }
+
+        .upload-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: var(--spacing-lg);
+            box-sizing: border-box;
+        }
+
+        .upload-box {
+            background: var(--panel-bg);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            padding: var(--spacing-xl);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: var(--panel-shadow);
+        }
+
+        .upload-box h1 {
+            margin: 0 0 var(--spacing-md) 0;
+            color: var(--text-color);
+            font-size: 1.5rem;
+            font-weight: 500;
+        }
+
+        .upload-box p {
+            color: var(--text-muted);
+            margin-bottom: var(--spacing-lg);
+            line-height: 1.6;
+        }
+
+        .upload-area {
+            border: 2px dashed var(--border-color);
+            border-radius: var(--radius-md);
+            padding: var(--spacing-xl);
+            margin-bottom: var(--spacing-lg);
+            background: var(--background-color);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .upload-area:hover {
+            border-color: var(--primary-color);
+            background: #f8fafc;
+        }
+
+        .upload-area.dragover {
+            border-color: var(--primary-color);
+            background: #f0f9ff;
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: var(--spacing-md);
+            color: var(--text-muted);
+        }
+
+        .upload-text {
+            font-size: 1.1rem;
+            color: var(--text-color);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .upload-subtext {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        .btn-upload {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: var(--spacing-md) var(--spacing-xl);
+            border-radius: var(--radius-md);
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: var(--spacing-md);
+        }
+
+        .btn-upload:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-upload:disabled {
+            background: #e5e7eb;
+            color: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .selected-files {
+            margin-top: var(--spacing-lg);
+            text-align: left;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--spacing-sm);
+            background: #f8fafc;
+            border-radius: var(--radius-sm);
+            margin-bottom: var(--spacing-sm);
+            font-size: 0.9rem;
+        }
+
+        .file-name {
+            color: var(--text-color);
+            flex: 1;
+            margin-right: var(--spacing-sm);
+        }
+
+        .file-size {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        .back-link {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: var(--text-color);
+            text-decoration: none;
+            background: var(--panel-bg);
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-md);
+            font-size: 0.9rem;
+            border: 1px solid var(--border-color);
+            transition: all 0.2s ease;
+        }
+
+        .back-link:hover {
+            background: var(--background-color);
+            border-color: var(--border-hover);
+        }
+
+        .progress-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2rem;
+            text-align: center;
+            flex-direction: column;
+            z-index: 100;
+        }
+
+        .progress-overlay p {
+            margin-top: 16px;
+            font-weight: 500;
+        }
+
+        .progress-bar {
+            width: 300px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+            margin-top: var(--spacing-md);
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--success-color);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+
+<body>
+    <a href="/" class="back-link">← กลับหน้าหลัก</a>
+
+    <div class="upload-container">
+        <div class="upload-box">
+            <h1>อัปโหลดภาพกระดาษคำตอบ</h1>
+            <p>เลือกรูปภาพจากแกลเลอรี่ของคุณ<br>สามารถเลือกหลายรูปพร้อมกันได้</p>
+
+            <div class="upload-area" id="upload-area">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">คลิกเพื่อเลือกไฟล์</div>
+                <div class="upload-subtext">หรือลากไฟล์มาวางที่นี่</div>
+            </div>
+
+            <input type="file" id="file-input" accept="image/*" multiple>
+
+            <button class="btn-upload" id="upload-btn" disabled>อัปโหลด</button>
+
+            <div class="selected-files" id="selected-files" style="display: none;">
+                <h3>ไฟล์ที่เลือก:</h3>
+                <div id="file-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="progress-overlay" id="progress-overlay">
+        <div class="spinner"></div>
+        <p id="progress-text">กำลังอัปโหลด...</p>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/capture.js') }}"></script>
+</body>
+
+</html>

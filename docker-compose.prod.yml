@@ -1,0 +1,28 @@
+name: omr-system-project
+
+services:
+  omr-app:
+    image: omr-system:latest  # ใช้ image ที่ build ไว้แล้ว
+    container_name: omr-system
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount volumes เพื่อเก็บข้อมูลถาวร
+      - ./uploads:/app/uploads
+      - ./debug_output:/app/debug_output
+      - ./config:/app/config
+    environment:
+      - OMR_BASE_URL=${OMR_BASE_URL:-http://localhost:5000}
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=5000
+      - FLASK_DEBUG=False
+      - FLASK_ENV=production
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - omr-network
+
+networks:
+  omr-network:
+    driver: bridge

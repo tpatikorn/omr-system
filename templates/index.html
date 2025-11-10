@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบตรวจกระดาษคำตอบ OMR</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/shared.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <!-- Mobile-only Welcome Screen -->
+    <div id="mobile-welcome" class="mobile-only">
+        <div class="welcome-box">
+            <h1>ระบบอัปโหลดภาพ OMR</h1>
+            <p>ระบบอัปโหลดภาพกระดาษคำตอบ</p>
+            <a href="/capture" class="btn btn-primary">เริ่มอัปโหลดภาพ</a>
+        </div>
+    </div>
+
+    <div class="main-container desktop-only">
+        <header class="main-header">
+            <div class="header-title">ระบบตรวจกระดาษคำตอบ OMR</div>
+            <div class="header-controls">
+                <div class="session-status-header">
+                    <div class="session-info-header">
+                        <span class="session-label">🔗 Session:</span>
+                        <span id="session-id-display-header">กำลังโหลด...</span>
+                    </div>
+                    <div class="server-info-header">
+                        <span class="server-label">🌐 Server:</span>
+                        <span id="server-ip-display-header">กำลังโหลด...</span>
+                    </div>
+                </div>
+                <div class="header-actions-main">
+                    <button id="show-qr-btn-header" class="btn-sm btn-info">📱 แสดง QR Code</button>
+                    <button id="copy-mobile-link-btn-header" class="btn-sm btn-outline">📋 คัดลอกลิงก์</button>
+                </div>
+            </div>
+        </header>
+
+        <div class="dashboard-grid">
+            <!-- LEFT PANEL (SHARED) -->
+            <div class="panel-left">
+                <!-- TOP-LEFT: Image Preview (SHARED) -->
+                <div class="panel-box">
+                    <div class="panel-header-vertical">
+                        <h3>กระดาษคำตอบ (<span id="image-count">0</span>)</h3>
+                        <div class="header-actions-horizontal">
+                            <button id="optimize-images-btn" class="btn-sm btn-info" disabled>🚀 ปรับขนาดเว็บ</button>
+                            <button id="clean-selected-btn" class="btn-sm btn-secondary" disabled>ปรับแสง</button>
+                            <button id="delete-selected-btn" class="btn-sm btn-danger" disabled>ลบเลือก</button>
+                            <button id="delete-all-btn" class="btn-sm btn-danger" disabled>ลบทั้งหมด</button>
+                        </div>
+                    </div>
+
+                    <!-- ส่วนอัปโหลดไฟล์ -->
+                    <div class="upload-section">
+                        <label for="pc-upload-input" class="btn btn-secondary">อัปโหลดไฟล์ (รูปภาพ/PDF)</label>
+                        <input type="file" id="pc-upload-input" accept="image/*,.pdf" multiple hidden>
+                    </div>
+
+                    <div id="image-preview-container">
+                        <div id="image-preview-grid"></div>
+                        <div class="upload-placeholder" id="upload-placeholder">
+                            <p>📁 ลากไฟล์คำตอบนักศึกษามาวาง (รูปภาพ/PDF)</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- รายชื่อนักศึกษา (ใช้ร่วมกัน) -->
+                <div class="panel-box">
+                    <div class="panel-header">
+                        <h3>รายชื่อนักศึกษา (.csv)</h3>
+                    </div>
+                    <div class="control-section">
+                        <div class="file-group">
+                            <label for="student-list-input" id="student-list-label"
+                                class="btn btn-label btn-secondary">อัพโหลด รายชื่อนักศึกษา</label>
+                            <input type="file" id="student-list-input" accept=".csv" hidden>
+                            <button id="view-student-list-btn" class="btn btn-sm btn-outline"
+                                style="display: none; margin-top: 8px;">ดูรายชื่อนักศึกษา</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BOTTOM-LEFT: Main Controls with Tabs -->
+                <div class="panel-box" id="controls-container">
+                    <!-- TABS NAVIGATION -->
+                    <div class="tabs">
+                        <button class="tab-link active" data-tab="single-answer-tab">ตรวจคำตอบแบบ 1 ตัวเลือก</button>
+                        <button class="tab-link" data-tab="multi-answer-tab">ตรวจคำตอบหลายตัวเลือก</button>
+                    </div>
+
+                    <!-- TAB CONTENT -->
+                    <div class="tab-content">
+                        <!-- SINGLE ANSWER TAB PANE -->
+                        <div id="single-answer-tab" class="tab-pane active">
+                            <div class="panel-header" style="margin-top:16px;">
+                                <h3>การประมวลผล (1 ตัวเลือก)</h3>
+                            </div>
+                            <!-- ส่วนไฟล์เฉลย -->
+                            <div class="control-section">
+                                <div class="file-group">
+                                    <label for="answer-key-input-single" id="answer-key-label-single"
+                                        class="btn btn-label btn-secondary">ไฟล์เฉลย 1 ตัวเลือก (.csv)</label>
+                                    <input type="file" id="answer-key-input-single" accept=".csv" required hidden>
+                                    <div style="display: flex; gap: 8px; margin-top: 8px;">
+                                        <button id="view-answer-key-btn-single" class="btn btn-sm btn-outline"
+                                            style="display: none; width: 100%;">ดูตารางเฉลย</button>
+                                        <button id="create-edit-answer-key-btn-single" class="btn btn-sm btn-secondary"
+                                            style="width: 100%;">สร้าง/แก้ไขเฉลย</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ส่วนการประมวลผล -->
+                            <div class="control-section">
+                                <button id="process-btn-single" class="btn btn-primary" disabled>เริ่มประมวลผล (1
+                                    ตัวเลือก)</button>
+                            </div>
+
+                        </div>
+
+                        <!-- MULTIPLE ANSWER TAB PANE -->
+                        <div id="multi-answer-tab" class="tab-pane">
+                            <div class="panel-header" style="margin-top:16px;">
+                                <h3>การประมวลผล (หลายตัวเลือก)</h3>
+                            </div>
+
+                            <!-- ส่วนไฟล์เฉลย -->
+                            <div class="control-section">
+                                <div class="file-group">
+                                    <label for="answer-key-input-multi" id="answer-key-label-multi"
+                                        class="btn btn-label btn-secondary">ไฟล์เฉลยหลายตัวเลือก (.csv)</label>
+                                    <input type="file" id="answer-key-input-multi" accept=".csv" required hidden>
+                                    <div style="display: flex; gap: 8px; margin-top: 8px;">
+                                        <button id="view-answer-key-btn-multi" class="btn btn-sm btn-outline"
+                                            style="display: none; width: 100%;">ดูตารางเฉลย</button>
+                                        <button id="create-edit-answer-key-btn-multi" class="btn btn-sm btn-secondary"
+                                            style="width: 100%;">สร้าง/แก้ไขเฉลย</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- ส่วนการประมวลผล -->
+                            <div class="control-section">
+                                <button id="process-btn-multi" class="btn btn-primary" disabled>เริ่มประมวลผล
+                                    (หลายตัวเลือก)</button>
+                            </div>
+
+
+                        </div>
+                    </div>
+
+
+                </div>
+
+                <!-- Export CSV Section -->
+                <div class="panel-box">
+                    <div class="panel-header">
+                        <h3>ส่งออกคะแนนนักศึกษา (.csv)</h3>
+                    </div>
+                    <div class="export-tabs">
+                        <div class="export-tab" id="export-single-tab">
+                            <h4>ส่งออก 1 ตัวเลือก</h4>
+                            <input type="text" id="output-filename-single" placeholder="ชื่อไฟล์ผลลัพธ์"
+                                value="single_answer_results">
+                            <button id="download-csv-btn-single" class="btn btn-success"
+                                style="display: none; margin-top:8px;">ดาวน์โหลด CSV</button>
+                        </div>
+                        <div class="export-tab" id="export-multi-tab">
+                            <h4>ส่งออกหลายตัวเลือก</h4>
+                            <input type="text" id="output-filename-multi" placeholder="ชื่อไฟล์ผลลัพธ์"
+                                value="multi_answer_results">
+                            <button id="download-csv-btn-multi" class="btn btn-success"
+                                style="display: none; margin-top:8px;">ดาวน์โหลด CSV</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tools Section -->
+                <div class="panel-box">
+                    <div class="panel-header">
+                        <h3>เครื่องมืออื่นๆ</h3>
+                    </div>
+                    <div class="control-section">
+                        <a href="/download_template" class="btn btn-secondary">📄 ดาวน์โหลดแบบฟอร์มกระดาษคำตอบ PDF</a>
+                        <a href="/manual" class="btn btn-secondary" style="margin-top: 8px;">📚 คู่มือการใช้งาน</a>
+                        <button id="new-session-btn" class="btn btn-danger" style="margin-top: 8px;"
+                            disabled>เซสชั่นใหม่ (ลบทุกอย่าง)</button>
+                    </div>
+                    <!-- ปุ่มดาวน์โหลดไฟล์เฉลยและรายชื่อ (แสดงแบบ dynamic ด้วย JS) -->
+                    <div id="download-files-section" class="download-section"></div>
+                </div>
+            </div>
+
+            <!-- RIGHT PANEL (Results area changes based on tab) -->
+            <div class="panel-box">
+                <!-- SINGLE ANSWER RESULTS -->
+                <div id="results-panel-single" class="results-panel active">
+                    <div class="panel-header">
+                        <h3>ผลการตรวจ (1 ตัวเลือก)</h3>
+                        <div class="header-actions">
+                            <button id="clear-results-btn-single" class="btn-sm btn-secondary"
+                                style="display: none;">เคลียร์ผลลัพธ์</button>
+                        </div>
+                    </div>
+                    <div id="results-area-single" class="results-area-content">
+                        <div class="loading-spinner" id="loading-spinner-single" style="display: none;">
+                            <div class="spinner"></div>
+                            <p>กำลังประมวลผล...</p>
+                        </div>
+                        <div class="results-placeholder" id="results-placeholder-single" style="display: fixd;">
+                            <p>ผลลัพธ์จะแสดงที่นี่</p>
+                        </div>
+                        <div class="table-container">
+                            <!-- ตารางที่ 1: กระดาษที่ไม่สามารถจับคู่รหัสกับชื่อได้ -->
+                            <div id="unmatched-section-single" style="display: none;">
+                                <h4 style="color: #ef4444; margin-bottom: 10px;">กระดาษที่ไม่สามารถจับคู่รหัสกับชื่อได้</h4>
+                                <table id="unmatched-table-single">
+                                    <thead>
+                                        <tr>
+                                            <th>รูปภาพ</th>
+                                            <th>ชื่อ</th>
+                                            <th>รหัสนักศึกษา</th>
+                                            <th>คะแนน</th>
+                                            <th>การจัดการ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="unmatched-tbody-single"></tbody>
+                                </table>
+                            </div>
+
+                            <!-- ตารางที่ 2: กระดาษที่จับคู่ได้ปกติ -->
+                            <div id="matched-section-single" style="display: none;">
+                                <h4 style="color: #10b981; margin-bottom: 10px;">กระดาษที่จับคู่รหัสกับชื่อได้</h4>
+                                <table id="results-table-single">
+                                    <thead>
+                                        <tr>
+                                            <th>รูปภาพ</th>
+                                            <th>ชื่อ</th>
+                                            <th>รหัสนักศึกษา</th>
+                                            <th>คะแนน</th>
+                                            <th>การจัดการ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="results-tbody-single"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MULTI ANSWER RESULTS -->
+                <div id="results-panel-multi" class="results-panel">
+                    <div class="panel-header">
+                        <h3>ผลการตรวจ (หลายตัวเลือก)</h3>
+                        <div class="header-actions">
+                            <button id="clear-results-btn-multi" class="btn-sm btn-secondary"
+                                style="display: none;">เคลียร์ผลลัพธ์</button>
+                        </div>
+                    </div>
+                    <div id="results-area-multi" class="results-area-content">
+                        <div class="loading-spinner" id="loading-spinner-multi" style="display: none;">
+                            <div class="spinner"></div>
+                            <p>กำลังประมวลผล...</p>
+                        </div>
+                        <div class="results-placeholder" id="results-placeholder-multi" style="display: flex;">
+                            <p>ผลลัพธ์จะแสดงที่นี่</p>
+                        </div>
+                        <div class="table-container">
+                            <!-- ตารางที่ 1: กระดาษที่ไม่สามารถจับคู่รหัสกับชื่อได้ -->
+                            <div id="unmatched-section-multi" style="display: none;">
+                                <h4 style="color: #ef4444; margin-bottom: 10px;">กระดาษที่ไม่สามารถจับคู่รหัสกับชื่อได้</h4>
+                                <table id="unmatched-table-multi">
+                                    <thead>
+                                        <tr>
+                                            <th>รูปภาพ</th>
+                                            <th>ชื่อ</th>
+                                            <th>รหัสนักศึกษา</th>
+                                            <th>คะแนน</th>
+                                            <th>การจัดการ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="unmatched-tbody-multi"></tbody>
+                                </table>
+                            </div>
+
+                            <!-- ตารางที่ 2: กระดาษที่จับคู่ได้ปกติ -->
+                            <div id="matched-section-multi" style="display: none;">
+                                <h4 style="color: #10b981; margin-bottom: 10px;">กระดาษที่จับคู่รหัสกับชื่อได้</h4>
+                                <table id="results-table-multi">
+                                    <thead>
+                                        <tr>
+                                            <th>รูปภาพ</th>
+                                            <th>ชื่อ</th>
+                                            <th>รหัสนักศึกษา</th>
+                                            <th>คะแนน</th>
+                                            <th>การจัดการ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="results-tbody-multi"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Modals (SHARED) -->
+    <!-- Image Modal -->
+    <div id="image-modal" class="modal">
+        <span class="modal-close">&times;</span>
+        <div class="modal-content"> <img id="modal-img"> </div>
+        <div class="zoom-info">
+            <p><strong>การใช้งาน:</strong></p>
+            <p>🖱️ เลื่อนล้อเมาส์: ซูมเข้า/ออก</p>
+            <p>🖱️ คลิกลาก: เลื่อนรูปภาพ</p>
+        </div>
+    </div>
+    <!-- Answer Key & Student List View Modals -->
+    <div id="data-view-modal" class="modal">
+        <div class="modal-dialog">
+            <div class="modal-content-dialog">
+                <div class="modal-header">
+                    <h3 id="data-view-modal-title">ดูข้อมูล</h3>
+                    <span class="modal-close" id="data-view-close">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div id="data-view-content">
+                        <p>กำลังโหลด...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Manual Answer Key Edit Modal -->
+    <div id="manual-answer-key-modal" class="modal">
+        <div class="modal-dialog" style="max-width: 95vw; width: fit-content; margin: 1% auto;">
+            <div class="modal-content-dialog">
+                <div class="modal-header">
+                    <h3 id="manual-answer-key-modal-title">สร้าง / แก้ไขตารางเฉลย</h3>
+                    <span class="modal-close" id="manual-answer-key-close">&times;</span>
+                </div>
+                <div class="modal-body" id="manual-answer-key-body">
+                    <div id="manual-answer-key-content">
+                        <!-- Content generated by JS -->
+                    </div>
+                </div>
+                <div class="modal-footer"
+                    style="display: flex; justify-content: flex-end; padding: 16px; border-top: 1px solid var(--border-color);">
+                    <button id="clear-manual-answer-key-btn" class="btn btn-secondary"
+                        style="margin-right: 8px;">ล้างทั้งหมด</button>
+                    <button id="save-manual-answer-key-btn" class="btn btn-primary">บันทึกเฉลย</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Score Edit Modal -->
+    <div id="score-edit-modal" class="modal">
+        <div class="modal-dialog" style="max-width: 95vw; width: 90vw; margin: 2% auto;">
+            <div class="modal-content-dialog">
+                <div class="modal-header">
+                    <h3 id="score-edit-modal-title">แก้ไขคะแนน</h3>
+                    <span class="modal-close" id="score-edit-close">&times;</span>
+                </div>
+                <div class="modal-body" style="padding: 0;">
+                    <div class="score-edit-container">
+                        <!-- Left Panel: Highlighted Image -->
+                        <div class="score-edit-panel score-edit-image">
+                            <div class="panel-header">
+                                <h4>รูปที่ไฮไลท์</h4>
+                                <button id="view-large-image-btn" class="btn-sm btn-info" style="margin-left: auto;" title="คลิกเพื่อดูรูปในขนาดใหญ่ พร้อมฟีเจอร์ซูมและแพน">
+                                    🔍 ดูรูปใหญ่
+                                </button>
+                            </div>
+                            <div class="image-container">
+                                <img id="score-edit-highlighted-image" src="" alt="Highlighted Answer Sheet">
+                            </div>
+                        </div>
+
+                        <!-- Middle Panel: Answer Form -->
+                        <div class="score-edit-panel score-edit-form">
+                            <div class="panel-header">
+                                <h4>คำตอบของนักศึกษา</h4>
+                            </div>
+                            <div class="student-info">
+                                <span id="score-edit-student-name">ชื่อนักศึกษา</span>
+                                <span id="score-edit-student-id">รหัสนักศึกษา</span>
+                            </div>
+                            <div class="answers-form" id="score-edit-answers-form">
+                                <!-- Dynamic content will be generated here -->
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Answer Key -->
+                        <div class="score-edit-panel score-edit-key">
+                            <div class="panel-header">
+                                <h4>เฉลย</h4>
+                            </div>
+                            <div class="answer-key-display" id="score-edit-answer-key">
+                                <!-- Answer key will be displayed here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer"
+                    style="display: flex; justify-content: space-between; padding: 16px; border-top: 1px solid var(--border-color);">
+                    <div class="score-display">
+                        <strong>คะแนนปัจจุบัน: <span id="current-score-display">0/0</span></strong>
+                    </div>
+                    <div class="footer-buttons">
+                        <button id="cancel-score-edit-btn" class="btn btn-secondary"
+                            style="margin-right: 8px;">ยกเลิก</button>
+                        <button id="save-score-edit-btn" class="btn btn-primary">บันทึกคะแนน</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- QR Code Modal -->
+    <div id="qr-modal" class="modal">
+        <div class="modal-dialog qr-modal-dialog">
+            <div class="modal-content-dialog">
+                <div class="modal-header">
+                    <h3>📱 สแกน QR Code เพื่อเชื่อมต่อมือถือ</h3>
+                    <span class="modal-close" id="qr-modal-close">&times;</span>
+                </div>
+                <div class="modal-body qr-modal-body">
+                    <div class="qr-content-wrapper">
+                        <!-- QR Code Section (Left) -->
+                        <div class="qr-code-section">
+                            <div id="qr-code-container" class="qr-container">
+                                <div id="qr-loading" class="qr-loading">
+                                    <div class="spinner"></div>
+                                    <p>กำลังสร้าง QR Code...</p>
+                                </div>
+                                <canvas id="qr-canvas" class="qr-canvas"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Instructions Section (Right) -->
+                        <div class="qr-instructions">
+                            <h4>วิธีการใช้งาน:</h4>
+                            <ol>
+                                <li>เปิดแอปกล้องในมือถือ</li>
+                                <li>ชี้กล้องไปที่ QR Code</li>
+                                <li>แตะลิงก์ที่ปรากฏขึ้น</li>
+                                <li>เริ่มใช้งานร่วมกันได้เลย!</li>
+                            </ol>
+                            <div class="qr-tip">
+                                <p>
+                                    💡 <strong>เคล็ดลับ:</strong> QR Code นี้จะเชื่อมต่อมือถือกับเบราว์เซอร์ของคุณ
+                                    ทำให้สามารถอัปโหลดรูปจากมือถือและดูผลลัพธ์ในเบราว์เซอร์ได้
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer qr-modal-footer">
+                    <button id="refresh-qr-btn" class="btn btn-secondary">🔄 สร้างใหม่</button>
+                    <button id="close-qr-btn" class="btn btn-primary">ปิด</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Score Edit Modal -->
+    <div id="score-edit-modal" class="modal score-edit-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>แก้ไขคะแนนนักศึกษา</h3>
+                <span id="score-edit-close" class="modal-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="score-edit-layout">
+                    <!-- Left: Student Info & Image -->
+                    <div class="score-edit-left">
+                        <div class="score-edit-info">
+                            <div class="student-info-row">
+                                <label>ชื่อ:</label>
+                                <span id="score-edit-student-name">-</span>
+                                <small id="name-status-indicator" style="margin-left: 10px; font-style: italic; color: #6b7280;"></small>
+                            </div>
+                            <div class="student-info-row">
+                                <label>รหัส:</label>
+                                <span id="score-edit-student-id">-</span>
+                                <button id="update-student-name-btn" class="btn-sm btn-secondary" style="margin-left: 10px; display: none;">อัพเดตชื่อ</button>
+                            </div>
+                            <div class="student-info-row">
+                                <label>คะแนน:</label>
+                                <span id="current-score-display">-/-</span>
+                            </div>
+                            <div class="update-instructions" style="margin-top: 10px; padding: 8px; background: #f0f9ff; border-radius: 4px; font-size: 13px; color: #1e40af;">
+                                💡 <strong>วิธีใช้:</strong> เลือกนักศึกษาจาก dropdown ด้านบน (จะแสดงเฉพาะคนที่ยังไม่ได้ใช้งาน)
+                            </div>
+                        </div>
+                        <div class="score-edit-image-container">
+                            <img id="score-edit-highlighted-image" src="" alt="Student Answer Sheet">
+                            <div class="magnifier-lens"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Right: Answer Form & Answer Key -->
+                    <div class="score-edit-right">
+                        <div class="score-edit-answers">
+                            <h4>คำตอบนักศึกษา</h4>
+                            <div id="score-edit-answers-form"></div>
+                        </div>
+                        <div class="score-edit-answer-key">
+                            <h4>เฉลย</h4>
+                            <div id="score-edit-answer-key"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancel-score-edit-btn" class="btn btn-secondary">ยกเลิก</button>
+                <button id="save-score-edit-btn" class="btn btn-primary">บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+
+</html>

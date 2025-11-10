@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>คู่มือการใช้งาน - ระบบตรวจกระดาษคำตอบ OMR</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/shared.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="main-container">
+        <header class="main-header">
+            📚 คู่มือการใช้งานระบบ OMR
+        </header>
+
+        <div class="panel-box" style="margin-bottom: var(--spacing-xl);">
+            <div class="panel-header">
+                <h3>📋 การใช้งานพื้นฐาน</h3>
+            </div>
+            <div class="manual-content-body"> <!-- New wrapper for manual content -->
+                <p>ระบบตรวจกระดาษคำตอบ OMR เป็นระบบที่ทันสมัยและใช้งานง่าย พัฒนาด้วยเทคโนโลยี OpenCV และ Flask รองรับการใช้งานผ่านเว็บเบราว์เซอร์และมือถือ</p>
+
+                <h3 class="subsection-title">การเตรียมไฟล์เฉลย</h3>
+
+                <div class="step-container-manual">
+                    <span class="step-number-manual">1</span>
+                    <strong>โหมด 1 คำตอบ (Single Answer)</strong>
+                    <div class="code-block-manual">
+1,2
+2,1
+3,4
+4,3
+5,2
+                    </div>
+                    <p>คอลัมน์แรก: หมายเลขข้อ | คอลัมน์สอง: คำตอบ (1=A, 2=B, 3=C, 4=D, 5=E)</p>
+                </div>
+
+                <div class="step-container-manual">
+                    <span class="step-number-manual">2</span>
+                    <strong>โหมดหลายคำตอบ (Multiple Answer)</strong>
+                    <div class="code-block-manual">
+1,1&3
+2,2
+3,1&2&4
+4,3
+5,2&5
+                    </div>
+                    <p>หลายคำตอบ: ใช้ & คั่น (เช่น 1&3 = A และ C)</p>
+                </div>
+
+                <h3 class="subsection-title">การเตรียมรายชื่อนักศึกษา</h3>
+                <div class="code-block-manual">
+650001,นายสมชาย ใจดี
+650002,นางสาวสมหญิง รักเรียน
+650003,นายสมศักดิ์ ขยันหา
+                </div>
+
+                <h3 class="subsection-title">ขั้นตอนการใช้งาน</h3>
+
+                <div class="step-container-manual">
+                    <span class="step-number-manual">1</span>
+                    <strong>เลือกโหมด</strong>
+                    <p>เลือก "ตรวจ 1 คำตอบ" หรือ "ตรวจหลายคำตอบ" ตามประเภทข้อสอบ</p>
+                </div>
+
+                <div class="step-container-manual">
+                    <span class="step-number-manual">2</span>
+                    <strong>อัปโหลดไฟล์เฉลย</strong>
+                    <p>คลิก "ไฟล์เฉลย" และเลือกไฟล์ CSV หรือใช้ "สร้าง/แก้ไขเฉลย" เพื่อสร้างผ่านเว็บ</p>
+                </div>
+
+                <div class="step-container-manual">
+                    <span class="step-number-manual">3</span>
+                    <strong>อัปโหลดรายชื่อนักศึกษา</strong>
+                    <p>คลิก "รายชื่อนักศึกษา" และเลือกไฟล์ CSV (ไม่บังคับ)</p>
+                </div>
+
+                <div class="step-container-manual">
+                    <span class="step-number-manual">4</span>
+                    <strong>อัปโหลดกระดาษคำตอบ</strong>
+                    <p>คลิก "อัปโหลดไฟล์" หรือลากไฟล์มาวาง รองรับ JPG, PNG, PDF</p>
+                </div>
+
+                <div class="step-container-manual">
+                    <span class="step-number-manual">5</span>
+                    <strong>ประมวลผล</strong>
+                    <p>คลิก "เริ่มประมวลผล" และรอผลลัพธ์</p>
+                </div>
+
+                <div class="step-container-manual">
+                    <span class="step-number-manual">6</span>
+                    <strong>ดาวน์โหลดผลลัพธ์</strong>
+                    <p>ตั้งชื่อไฟล์และคลิก "ดาวน์โหลด CSV"</p>
+                </div>
+
+                <div class="alert-box-manual alert-success-manual">
+                    <strong>✅ เสร็จสิ้น!</strong> การใช้งานพื้นฐานของระบบ OMR
+                </div>
+            </div>
+        </div>
+        <a href="/" class="btn btn-secondary" style="display: block; width: fit-content; margin: 0 auto 30px auto;">🏠 กลับหน้าหลัก</a>
+    </div>
+</body>
+</html>
